@@ -5,9 +5,9 @@ import requests
 from urllib.parse import urlparse
 
 # -------- CONFIG --------
-ROOT_FOLDER = r"C:\Users\Andy\Desktop\Discord"
-OUTPUT_FILE = r"C:\Users\Andy\Desktop\Results\results.txt"
-DOWNLOAD_FOLDER = r"G:\DiscDown"
+ROOT_FOLDER = r"WHERE TO SAVE YOUR PACKAGE AFTER GDPR REQUESTd"
+OUTPUT_FILE = r"WHERE TO SAVE OUTPUT FILE"
+DOWNLOAD_FOLDER = r"WHERE TO SAVE FILES DOWNLOADED"
 
 PATTERN = r"https://cdn\.discordapp\.com/attachments/\S+"
 regex = re.compile(PATTERN)
@@ -113,3 +113,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
