@@ -3,20 +3,27 @@ import json
 import re
 import requests
 from urllib.parse import urlparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from tqdm import tqdm
+import threading
 
 # -------- CONFIG --------
-ROOT_FOLDER = r"WHERE TO SAVE YOUR PACKAGE AFTER GDPR REQUESTd"
-OUTPUT_FILE = r"WHERE TO SAVE OUTPUT FILE"
-DOWNLOAD_FOLDER = r"WHERE TO SAVE FILES DOWNLOADED"
+ROOT_FOLDER = r"C:\Users\Andy\Desktop\Discord"
+OUTPUT_FILE = r"C:\Users\Andy\Desktop\Results\results.txt"
+DOWNLOAD_FOLDER = r"G:\DiscDown"
+
+MAX_WORKERS = 8   # increase (8–32) for faster downloads
 
 PATTERN = r"https://cdn\.discordapp\.com/attachments/\S+"
 regex = re.compile(PATTERN)
-
 # ------------------------
 
+# Lock prevents filename race conditions between threads
+filename_lock = threading.Lock()
 
+
+# ---------- JSON SEARCH ----------
 def search_in_data(data, file_path, results, path="root"):
-    """Recursively search JSON structure."""
     if isinstance(data, dict):
         for key, value in data.items():
             search_in_data(value, file_path, results, f"{path}.{key}")
@@ -33,6 +40,7 @@ def search_in_data(data, file_path, results, path="root"):
 
 def process_json_file(file_path):
     results = []
+
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -45,20 +53,32 @@ def process_json_file(file_path):
     return results
 
 
+# ---------- DOWNLOAD HELPERS ----------
 def get_filename_from_url(url):
-    """Extract filename safely from URL."""
     parsed = urlparse(url)
     return os.path.basename(parsed.path)
 
 
-def download_file(url, download_folder):
-    """Download attachment if not already downloaded."""
-    filename = get_filename_from_url(url)
-    save_path = os.path.join(download_folder, filename)
+def get_unique_filepath(folder, filename):
+    """
+    Thread-safe filename collision handling.
+    """
+    with filename_lock:
+        base, ext = os.path.splitext(filename)
+        counter = 1
+        new_path = os.path.join(folder, filename)
 
-    if os.path.exists(save_path):
-        print(f"Skipping (already exists): {filename}")
-        return
+        while os.path.exists(new_path):
+            new_filename = f"{base}_{counter}{ext}"
+            new_path = os.path.join(folder, new_filename)
+            counter += 1
+
+        return new_path
+
+
+def download_file(url):
+    filename = get_filename_from_url(url)
+    save_path = get_unique_filepath(DOWNLOAD_FOLDER, filename)
 
     try:
         response = requests.get(url, stream=True, timeout=30)
@@ -69,12 +89,13 @@ def download_file(url, download_folder):
                 if chunk:
                     f.write(chunk)
 
-        print(f"Downloaded: {filename}")
+        return True
 
-    except Exception as e:
-        print(f"Failed download {url}: {e}")
+    except Exception:
+        return False
 
 
+# ---------- MAIN ----------
 def main():
     os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
     os.makedirs(os.path.dirname(OUTPUT_FILE), exist_ok=True)
@@ -82,7 +103,9 @@ def main():
     all_results = []
     unique_urls = set()
 
-    # ---- Scan JSON files ----
+    print("Scanning JSON files...")
+
+    # Scan folders
     for root, _, files in os.walk(ROOT_FOLDER):
         for file in files:
             if file.lower().endswith(".json"):
@@ -93,7 +116,7 @@ def main():
                     all_results.append(r)
                     unique_urls.add(r[2])
 
-    # ---- Save matches ----
+    # Save matches
     with open(OUTPUT_FILE, "w", encoding="utf-8") as out:
         for file_path, location, url in all_results:
             out.write(f"File: {file_path}\n")
@@ -104,11 +127,23 @@ def main():
     print(f"\nSaved {len(all_results)} matches.")
     print(f"Unique files to download: {len(unique_urls)}")
 
-    # ---- Download attachments ----
-    for url in unique_urls:
-        download_file(url, DOWNLOAD_FOLDER)
+    # ---------- MULTI-THREADED DOWNLOAD ----------
+    print("\nDownloading attachments...")
 
-    print("\nDone!")
+    success = 0
+
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        futures = [executor.submit(download_file, url) for url in unique_urls]
+
+        for future in tqdm(as_completed(futures),
+                           total=len(futures),
+                           desc="Downloading",
+                           unit="file"):
+            if future.result():
+                success += 1
+
+    print(f"\nDownloaded successfully: {success}/{len(unique_urls)}")
+    print("Done!")
 
 
 if __name__ == "__main__":
